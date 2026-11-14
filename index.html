@@ -1,11 +1,11 @@
 <!doctype html>
 <html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Палац — хозяйство</title>
 <style>body{font-family:system-ui,Arial;background:#f3f5f8;color:#1d2939;margin:0}header{background:#17365d;color:white;padding:22px}main{max-width:850px;margin:25px auto;padding:0 16px}.card{background:white;border-radius:14px;padding:20px;margin:14px 0;box-shadow:0 2px 9px #0001}button{border:0;border-radius:8px;background:#1769aa;color:white;padding:11px 15px;cursor:pointer}input,select{padding:10px;border:1px solid #ccd3dc;border-radius:8px;max-width:100%;box-sizing:border-box}label{display:block;margin:10px 0 5px}.muted{color:#64748b}.row{display:flex;gap:10px;flex-wrap:wrap;align-items:center}.status{font-weight:bold;color:#155e75}h1,h2{margin:0 0 10px}.danger{background:#b42318}.secondary{background:#667085}</style></head>
-<body><header><h1>Палац · Хозяйство</h1><div>Пилотный календарь обслуживания</div></header><main><div class="card"><h2>Мои задачи</h2><div id="tasks"></div></div><div class="card"><h2>Добавить задачу</h2><label>Название</label><input id="newName" placeholder="Например, проверка генератора" style="width:100%"><div class="row"><div><label>Интервал, дней</label><input id="newInterval" type="number" min="1" value="14"></div><div><label>Предупреждать за, дней</label><input id="newLead" type="number" min="0" value="2"></div></div><button onclick="addTask()" style="margin-top:15px">Добавить</button></div><p class="muted">Пилот: данные сохраняются только в этом браузере. Синхронизация между устройствами и push-уведомления ещё не подключены. Даты и прогнозы служат для проверки логики.</p></main>
+<body><header><h1>Палац · Хозяйство</h1><div>Пилотный календарь обслуживания</div></header><main><div class="card" id="cloudPanel"><div class="row"><strong id="cloudStatus">Подключение к Firebase…</strong><button id="loginBtn" style="display:none">Войти через Google</button><button id="logoutBtn" class="secondary" style="display:none">Выйти</button></div><p class="muted" id="cloudHint">До входа изменения сохраняются только в этом браузере.</p></div><div class="card"><h2>Мои задачи</h2><div id="tasks"></div></div><div class="card"><h2>Добавить задачу</h2><label>Название</label><input id="newName" placeholder="Например, проверка генератора" style="width:100%"><div class="row"><div><label>Интервал, дней</label><input id="newInterval" type="number" min="1" value="14"></div><div><label>Предупреждать за, дней</label><input id="newLead" type="number" min="0" value="2"></div></div><button onclick="addTask()" style="margin-top:15px">Добавить</button></div><p class="muted">Пилот: после входа через Google задачи синхронизируются между устройствами. Push-уведомления пока не подключены. Даты и прогнозы ориентировочные.</p></main>
 <script>
 const key='palas-pilot-v1';const iso=d=>{let x=new Date(d);return x.getFullYear()+'-'+String(x.getMonth()+1).padStart(2,'0')+'-'+String(x.getDate()).padStart(2,'0')};const addDays=(s,n)=>{let d=new Date(s+'T12:00:00');d.setDate(d.getDate()+n);return iso(d)};const fmt=s=>new Date(s+'T12:00:00').toLocaleDateString('ru-RU');
 let tasks;try{tasks=JSON.parse(localStorage.getItem(key))}catch(e){}if(!Array.isArray(tasks))tasks=[{id:1,name:'Покос газона',type:'lawn',interval:14,lead:2,last:null,seasonStart:'04-20',seasonEnd:'10-31'},{id:2,name:'Контроль септика',type:'septic',interval:30,lead:7,measurements:[]}];
-function save(){localStorage.setItem(key,JSON.stringify(tasks));render()}
+function save(){localStorage.setItem(key,JSON.stringify(tasks));render();if(window.palasCloudSave)window.palasCloudSave(tasks)}
 function nextSeasonDate(s,t){let y=+s.slice(0,4),start=y+'-'+t.seasonStart,end=y+'-'+t.seasonEnd;if(s<start)return start;if(s>end)return (y+1)+'-'+t.seasonStart;return s}
 function nextDate(t){let today=iso(new Date()),base=t.last?addDays(t.last,t.interval):today;if(t.type==='lawn')return nextSeasonDate(base,t);return base}
 function safe(s){return String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))}
@@ -16,4 +16,57 @@ function measure(id){let t=tasks.find(x=>x.id===id),p=Number(document.getElement
 function addTask(){let name=document.getElementById('newName').value.trim(),interval=+document.getElementById('newInterval').value,lead=+document.getElementById('newLead').value;if(!name||interval<1||lead<0||!Number.isFinite(interval)||!Number.isFinite(lead)){alert('Проверь название и интервалы');return}tasks.push({id:Date.now(),name,type:'regular',interval,lead,last:null});document.getElementById('newName').value='';save()}
 function editTask(id){let t=tasks.find(x=>x.id===id),i=prompt('Интервал проверки (дней)',t.interval);if(i===null)return;let l=prompt('Предупреждать за сколько дней?',t.lead);if(l===null)return;if(+i<1||+l<0||!Number.isFinite(+i)||!Number.isFinite(+l))return alert('Неверные числа');t.interval=+i;t.lead=+l;save()}
 function removeTask(id){if(confirm('Удалить задачу и её историю?')){tasks=tasks.filter(x=>x.id!==id);save()}}render();
+window.palasBridge={getTasks:()=>tasks,setTasks:(incoming)=>{tasks=incoming;localStorage.setItem(key,JSON.stringify(tasks));render()}};
+</script>
+<script type="module">
+import {initializeApp} from 'https://www.gstatic.com/firebasejs/11.10.0/firebase-app.js';
+import {getAuth,GoogleAuthProvider,signInWithPopup,signInWithRedirect,getRedirectResult,onAuthStateChanged,signOut} from 'https://www.gstatic.com/firebasejs/11.10.0/firebase-auth.js';
+import {getFirestore,doc,getDoc,setDoc,onSnapshot} from 'https://www.gstatic.com/firebasejs/11.10.0/firebase-firestore.js';
+const firebaseConfig={
+ apiKey:'AIzaSyAHX86F3oSjTHYOs6Xg4w-ZKS3DBUvUw6c',
+ authDomain:'palas-e34cb.firebaseapp.com',
+ projectId:'palas-e34cb',
+ storageBucket:'palas-e34cb.firebasestorage.app',
+ messagingSenderId:'1091689866084',
+ appId:'1:1091689866084:web:71bfdfef213b83b0271071'
+};
+const status=document.getElementById('cloudStatus'),hint=document.getElementById('cloudHint'),login=document.getElementById('loginBtn'),logout=document.getElementById('logoutBtn');
+let auth,db,user=null,unsubscribe=null,ready=false,writeQueue=Promise.resolve();
+function show(message,detail=''){status.textContent=message;hint.textContent=detail}
+function errorText(e){return (e?.code||'Ошибка')+': '+(e?.message||String(e))}
+try{
+ const app=initializeApp(firebaseConfig);auth=getAuth(app);db=getFirestore(app);
+ const provider=new GoogleAuthProvider();provider.setCustomParameters({prompt:'select_account'});
+ login.onclick=async()=>{try{await signInWithPopup(auth,provider)}catch(e){if(e.code==='auth/popup-blocked'){await signInWithRedirect(auth,provider)}else show('Не удалось войти',errorText(e))}};
+ logout.onclick=async()=>{await signOut(auth)};
+ getRedirectResult(auth).catch(e=>show('Ошибка входа',errorText(e)));
+ onAuthStateChanged(auth,async u=>{
+  if(unsubscribe){unsubscribe();unsubscribe=null}ready=false;user=null;
+  if(!u){show('Не выполнен вход','Нажми «Войти через Google», чтобы синхронизировать задачи.');login.style.display='inline-block';logout.style.display='none';return}
+  login.style.display='none';logout.style.display='inline-block';
+  user=u;show('Подключаем облачную базу…',u.email);
+  const ref=doc(db,'users',u.uid,'palas','tasks');
+  try{
+   const snap=await getDoc(ref);
+   if(snap.exists()){
+    const cloudTasks=snap.data().tasks;
+    if(Array.isArray(cloudTasks))window.palasBridge.setTasks(cloudTasks);
+   }else{
+    // Initial migration: existing browser tasks become the initial cloud copy.
+    await setDoc(ref,{tasks:window.palasBridge.getTasks(),updatedAt:new Date().toISOString()});
+   }
+   ready=true;show('Синхронизация включена',u.email+' · Изменения сохраняются в Firebase');
+   unsubscribe=onSnapshot(ref,s=>{
+    if(!s.exists())return;
+    const cloudTasks=s.data().tasks;
+    if(Array.isArray(cloudTasks)&&JSON.stringify(cloudTasks)!==JSON.stringify(window.palasBridge.getTasks()))window.palasBridge.setTasks(cloudTasks);
+   },e=>show('Ошибка синхронизации',errorText(e)));
+  }catch(e){show('Нет доступа к базе данных',errorText(e)+' · Проверь правила Firestore и адрес Google.');}
+ });
+ window.palasCloudSave=(newTasks)=>{
+  if(!user||!ready)return;
+  const uid=user.uid;const copy=JSON.parse(JSON.stringify(newTasks));
+  writeQueue=writeQueue.then(()=>setDoc(doc(db,'users',uid,'palas','tasks'),{tasks:copy,updatedAt:new Date().toISOString()})).catch(e=>show('Ошибка сохранения в облако',errorText(e)));
+ };
+}catch(e){show('Ошибка запуска Firebase',errorText(e))}
 </script></body></html>
